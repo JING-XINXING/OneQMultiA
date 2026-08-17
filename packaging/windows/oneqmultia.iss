@@ -1,9 +1,6 @@
 ; OneQMultiA Windows 安装程序（Inno Setup 6）
-; 由 scripts/build_windows.ps1 传入 /DRepoRoot= 与 /DMyAppVersion=
+; 所有文件路径相对本脚本所在目录 packaging/windows/，避免 Windows 盘符路径中的 \a 转义。
 
-#ifndef RepoRoot
-  #define RepoRoot ".."
-#endif
 #ifndef MyAppVersion
   #define MyAppVersion "0.2.0"
 #endif
@@ -23,7 +20,7 @@ AppSupportURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir={#RepoRoot}\release
+OutputDir=..\..\release
 OutputBaseFilename=OneQMultiA-{#MyAppVersion}-win64-setup
 Compression=lzma2
 SolidCompression=yes
@@ -32,7 +29,7 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-SetupIconFile={#RepoRoot}\packaging\icons\OneQMultiA.ico
+SetupIconFile=..\icons\OneQMultiA.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 MinVersion=10.0
 
@@ -43,8 +40,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#RepoRoot}\dist\OneQMultiA\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#RepoRoot}\packaging\windows\start_chrome_cdp.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\OneQMultiA\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "start_chrome_cdp.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

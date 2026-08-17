@@ -22,11 +22,11 @@ fi
 echo "==> 构建 React 前端"
 (cd "$ROOT/frontend" && npm ci --ignore-scripts && npm run build)
 
-echo "==> 生成图标"
-python "$ROOT/packaging/icons/generate_icons.py"
-
 echo "==> 安装打包依赖"
 python -m pip install -q -e ".[packaging]"
+
+echo "==> 生成图标"
+python "$ROOT/packaging/icons/generate_icons.py"
 
 echo "==> PyInstaller"
 rm -rf "$ROOT/build/pyinstaller" "$ROOT/dist/OneQMultiA" "$ROOT/dist/OneQMultiA.app"

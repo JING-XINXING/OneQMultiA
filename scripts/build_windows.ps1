@@ -21,11 +21,11 @@ npm ci --ignore-scripts
 npm run build
 Pop-Location
 
-Write-Host "==> 生成图标"
-python "$Root\packaging\icons\generate_icons.py"
-
 Write-Host "==> 安装打包依赖"
 python -m pip install -q -e ".[packaging]"
+
+Write-Host "==> 生成图标"
+python "$Root\packaging\icons\generate_icons.py"
 
 Write-Host "==> PyInstaller"
 if (Test-Path "$Root\dist\OneQMultiA") { Remove-Item -Recurse -Force "$Root\dist\OneQMultiA" }
@@ -55,5 +55,7 @@ if (-not $iscc) {
 }
 
 Write-Host "==> Inno Setup"
-& $iscc /DRepoRoot="$Root" /DMyAppVersion="$Version" "$Root\packaging\windows\oneqmultia.iss"
+# 路径一律相对 .iss 所在目录，避免 /DRepoRoot=D:\a\... 中 \a 被 Inno 当成转义
+& $iscc "/DMyAppVersion=$Version" "$Root\packaging\windows\oneqmultia.iss"
+if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败" }
 Write-Host "完成：release\OneQMultiA-$Version-win64-setup.exe"
