@@ -49,7 +49,8 @@ mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
-DMG="$ROOT/release/OneQMultiA-${VERSION}-macos.dmg"
+ARCH="$(uname -m)"
+DMG="$ROOT/release/OneQMultiA-${VERSION}-macos-${ARCH}.dmg"
 rm -f "$DMG"
 hdiutil create \
   -volname "OneQMultiA" \
