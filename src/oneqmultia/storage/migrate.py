@@ -1,0 +1,83 @@
+"""轻量 SQLite 列迁移：为已有库补齐新增字段，避免 create_all 无法 ALTER。"""
+
+from __future__ import annotations
+
+import logging
+from typing import Iterable
+from urllib.parse import urlparse
+
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
+
+_log = logging.getLogger(__name__)
+
+# 平台表新增列：账号绑定状态 + 网址校验结果
+_PLATFORM_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("login_status", "VARCHAR(32) DEFAULT 'unknown'"),
+    ("login_checked_at", "DATETIME"),
+    ("login_message", "TEXT DEFAULT ''"),
+    ("url_status", "VARCHAR(32) DEFAULT 'unknown'"),
+    ("url_checked_at", "DATETIME"),
+    ("url_check_message", "TEXT DEFAULT ''"),
+    ("expected_host", "VARCHAR(256) DEFAULT ''"),
+)
+
+# 问答表：缓存最优答案 JSON
+_QA_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("optimal_answer", "JSON"),
+)
+
+
+def _add_missing_columns(conn, table: str, existing: set[str], columns: tuple[tuple[str, str], ...]) -> list[str]:
+    """给已有表补列，返回本次新增列名。"""
+    added: list[str] = []
+    for name, ddl in columns:
+        if name in existing:
+            continue
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+        added.append(name)
+    return added
+
+
+def migrate_schema(engine: Engine) -> None:
+    """为已存在的表补齐缺失列，并回填 expected_host。"""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        if "platform_configs" in tables:
+            existing = {col["name"] for col in inspector.get_columns("platform_configs")}
+            added = _add_missing_columns(conn, "platform_configs", existing, _PLATFORM_NEW_COLUMNS)
+            if added:
+                _log.info("已为 platform_configs 增加列：%s", ", ".join(added))
+            _backfill_expected_host(conn)
+        if "qa_pairs" in tables:
+            existing_qa = {col["name"] for col in inspector.get_columns("qa_pairs")}
+            added_qa = _add_missing_columns(conn, "qa_pairs", existing_qa, _QA_NEW_COLUMNS)
+            if added_qa:
+                _log.info("已为 qa_pairs 增加列：%s", ", ".join(added_qa))
+
+
+def _backfill_expected_host(conn) -> None:
+    """用现有 url 的主机名填充空的 expected_host，作为后续校验基准。"""
+    rows: Iterable = conn.execute(
+        text("SELECT id, url, expected_host FROM platform_configs")
+    ).fetchall()
+    for row in rows:
+        current = (row[2] or "").strip()
+        if current:
+            continue
+        host = _host_from_url(row[1] or "")
+        if not host:
+            continue
+        conn.execute(
+            text("UPDATE platform_configs SET expected_host = :host WHERE id = :pid"),
+            {"host": host, "pid": row[0]},
+        )
+
+
+def _host_from_url(url: str) -> str:
+    try:
+        return urlparse(url).netloc.removeprefix("www.").lower()
+    except Exception:
+        return ""

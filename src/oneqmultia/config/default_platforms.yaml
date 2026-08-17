@@ -1,0 +1,509 @@
+# 预置平台 — selectors 校准说明：
+# 1) 用 Chrome 打开目标站 → F12 → 在 Elements 中选中输入框/发送键/最后一条助手消息，复制 selector。
+# 2) 在已登录浏览器中验证：Playwright 连接 CDP 后可在 /docs 调健康检查或实际 ask。
+# 3) 站点改版后通过 PATCH /api/platforms/{id} 更新 selectors，无需改代码。
+# 4) 若库中已有数据，default_platforms.yaml 不会覆盖 DB；需运行 python -m oneqmultia.tools.reset_db 或删库后重启以重新 seed。
+# interaction.input_method: keyboard(推荐，触发React合成事件) | fill | type
+# interaction.send_method:  enter(推荐，跨站通用) | click
+# interaction.wait_strategy: polling
+# timeout_seconds：等回答生成的上限（按历史成功耗时 + 余量）。找输入框另有短超时，避免选不到框时空等满档。
+platforms:
+  - id: chatgpt
+    display_name: ChatGPT
+    url: https://chatgpt.com/
+    icon: chatgpt.svg
+    group: international
+    enabled: true
+    sort_order: 1
+    timeout_seconds: 180
+    adapter_type: specialized
+    adapter_module: "oneqmultia.platforms.specialized.chatgpt:ChatGPTAdapter"
+    selectors:
+      # ChatGPT ProseMirror 编辑区（contenteditable div）
+      # 备用：新版可能改为 #prompt-textarea（无 div 前缀）或 textarea
+      # 优先可见的 composer；隐藏的 #prompt-textarea 副本由 generic 跳过
+      input_box: "#prompt-textarea, [data-testid='prompt-textarea'], div.ProseMirror[contenteditable='true'], div[contenteditable='true'][role='textbox']"
+      send_button: 'button[data-testid="send-button"], button[aria-label*="Send"], button[aria-label*="发送"]'
+      # 新版 ChatGPT 回复在 [data-message-author-role="assistant"] 下的 .markdown/.prose
+      response_container: '[data-message-author-role="assistant"] .markdown, [data-message-author-role="assistant"] .prose, [data-message-author-role="assistant"]'
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: click
+      wait_strategy: polling
+
+  - id: gemini
+    display_name: Gemini
+    url: https://gemini.google.com/app
+    icon: gemini.svg
+    group: international
+    enabled: true
+    sort_order: 2
+    timeout_seconds: 210
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # Quill 编辑器；部分版本在 rich-textarea 的 shadow root 内
+      input_box: ".ql-editor[contenteditable='true'], rich-textarea .ql-editor, rich-textarea >>> [contenteditable='true'], [aria-label*='Enter a prompt'], [aria-label*='向 Gemini'], [aria-label*='提示'], div[contenteditable='true'][role='textbox']"
+      send_button: "button[aria-label*='Send'], button[aria-label*='发送'], button.send-button, button[jsname*='send']"
+      response_container: "model-response, message-content, .model-response-text, model-response .markdown, message-content .markdown"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: click
+      wait_strategy: polling
+
+  - id: grok
+    display_name: Grok
+    url: https://grok.com/
+    icon: grok.svg
+    group: international
+    enabled: true
+    sort_order: 3
+    timeout_seconds: 300
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[type='submit']"
+      response_container: ".prose"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: copilot
+    display_name: Copilot
+    url: https://copilot.microsoft.com/
+    icon: copilot.svg
+    group: international
+    enabled: true
+    sort_order: 4
+    timeout_seconds: 240
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # Copilot textarea；Send button 有 aria-label
+      input_box: "textarea[id*='userInput'], textarea, div[role='textbox']"
+      send_button: "button[aria-label*='Submit'], button[aria-label*='Send'], button[type='submit']"
+      response_container: "[data-content='message'], .ac-textBlock"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: perplexity
+    display_name: Perplexity AI
+    url: https://www.perplexity.ai/
+    icon: perplexity.svg
+    group: international
+    enabled: true
+    sort_order: 5
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea[placeholder], textarea"
+      send_button: "button[aria-label*='Submit'], button[type='submit']"
+      response_container: ".prose, [class*='AnswerBody']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: pi
+    display_name: Pi
+    url: https://pi.ai/talk
+    icon: pi.svg
+    group: international
+    enabled: true
+    sort_order: 6
+    timeout_seconds: 210
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea[enterkeyhint='enter'], textarea, div[contenteditable='true']"
+      send_button: "button[type='submit'], button[aria-label*='Send']"
+      response_container: "[class*='pi-response'], [class*='assistant'], [class*='message-text'], [class*='chat-row'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: genspark
+    display_name: Genspark AI
+    url: https://www.genspark.ai/
+    icon: genspark.svg
+    group: international
+    enabled: true
+    sort_order: 7
+    # Super Agent 多步执行较慢，给足轮询时间
+    timeout_seconds: 210
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # 首页 Super Agent：textarea.search-input / name=query；发送控件为 .enter-icon
+      # 对话页可能复用同一输入组件，通用 textarea 作为兜底
+      input_box: "textarea.search-input, textarea.j-search-input, textarea[name='query'], textarea"
+      send_button: ".enter-icon.cursor-pointer, .enter-icon"
+      response_container: "[class*='markdown'], [class*='message-content'], [class*='agent-content'], [class*='spark-content'], article"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: deepseek
+    display_name: DeepSeek
+    url: https://chat.deepseek.com/
+    icon: deepseek.svg
+    group: domestic
+    enabled: true
+    sort_order: 10
+    timeout_seconds: 90
+    adapter_type: specialized
+    adapter_module: "oneqmultia.platforms.specialized.deepseek:DeepSeekAdapter"
+    selectors:
+      # DeepSeek：textarea + Enter 提交
+      input_box: "textarea"
+      send_button: "div[role='button'][aria-label*='Send'], div[role='button'][aria-label*='发送'], button[type='submit']"
+      response_container: ".ds-markdown, .markdown, [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: doubao
+    display_name: 豆包
+    url: https://www.doubao.com/chat/
+    icon: doubao.svg
+    group: domestic
+    enabled: true
+    sort_order: 11
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea[placeholder], textarea, div[contenteditable='true']"
+      send_button: "button[aria-label='发送'], button[data-e2e='send-button'], button[type='submit']"
+      # 豆包常原地改最后一条回复，勿只用过宽的 content 通配
+      response_container: "[data-testid*='message'], [class*='receive'], [class*='bot-content'], [class*='message__ai'], [class*='paragraph'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: qianwen
+    display_name: 通义千问(Web)
+    url: https://www.qianwen.com/
+    icon: qianwen.svg
+    group: domestic
+    enabled: true
+    sort_order: 12
+    timeout_seconds: 240
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea, div[contenteditable='true']"
+      send_button: "button[type='submit'], button[aria-label*='发送'], div[class*='send'][role='button']"
+      response_container: "[class*='answer'], [class*='response'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: qwen
+    display_name: Qwen Chat
+    url: https://chat.qwen.ai/
+    icon: qwen.svg
+    group: domestic
+    enabled: true
+    sort_order: 13
+    timeout_seconds: 120
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # chat.qwen.ai：textarea；Enter 提交
+      input_box: "textarea"
+      send_button: "button[type='submit'], button[aria-label*='发送'], button[aria-label*='Send']"
+      response_container: "[class*='markdown'], [class*='message-content'], article"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: kimi
+    display_name: Kimi
+    url: https://www.kimi.com/
+    icon: kimi.svg
+    group: domestic
+    enabled: true
+    sort_order: 14
+    timeout_seconds: 90
+    adapter_type: specialized
+    adapter_module: "oneqmultia.platforms.specialized.kimi:KimiAdapter"
+    selectors:
+      # Kimi 输入区为 contenteditable div
+      input_box: "div[contenteditable='true'], textarea"
+      send_button: "button[type='submit'], button[aria-label*='发送']"
+      response_container: "[class*='msh-chat-message']:last-child, [class*='message-content'], .markdown, article"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: chatglm
+    display_name: 智谱清言
+    url: https://chatglm.cn/
+    icon: chatglm.svg
+    group: domestic
+    enabled: true
+    sort_order: 15
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea, div[contenteditable='true']"
+      send_button: "button[aria-label*='发送'], button[class*='send'], button[type='submit']"
+      response_container: ".markdown-body, [class*='chat-message'] .content"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: minimax_agent
+    display_name: MiniMax Agent
+    url: https://agent.minimaxi.com/
+    icon: minimax.svg
+    group: domestic
+    enabled: true
+    sort_order: 16
+    timeout_seconds: 150
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea, div[contenteditable='true']"
+      send_button: "button[aria-label*='发送'], button[class*='send'], button[type='submit']"
+      response_container: "[class*='message'] [class*='content'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: longcat
+    display_name: LongCat
+    url: https://longcat.chat/
+    icon: longcat.svg
+    group: domestic
+    enabled: true
+    sort_order: 17
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[type='submit'], button[aria-label*='发送']"
+      response_container: ".markdown, [class*='message']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: yuanbao
+    display_name: 元宝
+    url: https://yuanbao.tencent.com/
+    icon: yuanbao.svg
+    group: domestic
+    enabled: true
+    sort_order: 18
+    timeout_seconds: 120
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # 腾讯元宝：textarea；发送按钮有 aria-label
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[class*='send-btn'], button[type='submit']"
+      response_container: "[class*='answer-content'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: lingguang
+    display_name: 灵光
+    url: https://www.lingguang.com/chat
+    icon: lingguang.svg
+    group: domestic
+    enabled: true
+    sort_order: 19
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea, div[contenteditable='true'][role='textbox'], div[contenteditable='true']"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      # 避免 [class*='content'] 匹配整页导致读不到「新增」回答
+      response_container: "[class*='assistant'], [class*='bot-message'], [class*='ai-content'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: stepfun
+    display_name: 阶跃AI
+    # 官网 www.stepfun.com 会 302 到对话站；直接使用规范入口
+    url: https://chat.stepfun.com/chats/new
+    icon: stepfun.svg
+    group: domestic
+    enabled: true
+    sort_order: 20
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      response_container: "[class*='markdown'], [class*='message']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: zidongtaichu
+    display_name: 紫东太初
+    url: https://www.zidongtaichu.com/#/chat
+    icon: zidongtaichu.svg
+    group: domestic
+    enabled: true
+    sort_order: 21
+    timeout_seconds: 90
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      response_container: "[class*='reply'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: sensetime
+    display_name: 商汤商量
+    url: https://chat.sensetime.com/
+    icon: sensetime.svg
+    group: domestic
+    enabled: true
+    sort_order: 22
+    timeout_seconds: 90
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      response_container: "[class*='message'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: tiangong
+    display_name: 天工
+    url: https://www.tiangong.cn/
+    icon: tiangong.svg
+    group: domestic
+    enabled: true
+    sort_order: 23
+    timeout_seconds: 180
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      response_container: "[class*='answer'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: wanmol
+    display_name: 万联摩尔
+    url: https://www.wanmol.com/
+    icon: wanmol.svg
+    group: domestic
+    enabled: true
+    sort_order: 24
+    timeout_seconds: 90
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      input_box: "textarea"
+      send_button: "button[aria-label*='发送'], button[type='submit']"
+      response_container: "[class*='content'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
+
+  - id: coze
+    display_name: 扣子
+    url: https://www.coze.cn/home
+    icon: coze.svg
+    group: domestic
+    enabled: true
+    sort_order: 25
+    timeout_seconds: 150
+    adapter_type: generic
+    adapter_module: ""
+    selectors:
+      # 对话入口在 /home，根路径常是营销页没有提问框
+      input_box: "textarea, div[contenteditable='true'][role='textbox'], div[contenteditable='true']"
+      send_button: "button[aria-label*='发送'], button[aria-label*='Send'], button[type='submit']"
+      response_container: "[class*='message-content'], [class*='chat-message'], [class*='assistant'], [class*='markdown']"
+      response_complete: ""
+      new_chat_button: ""
+    interaction:
+      input_method: keyboard
+      send_method: enter
+      wait_strategy: polling
