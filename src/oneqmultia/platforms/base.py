@@ -25,6 +25,10 @@ class PlatformRuntimeConfig:
     interaction: Dict[str, Any]
     adapter_type: str
     adapter_module: str
+    # web_only | api_only | web_with_api_fallback
+    execution_mode: str = "web_only"
+    api_provider: str = ""
+    api_model: str = ""
 
     @classmethod
     def from_row(cls, row: PlatformConfigRow) -> "PlatformRuntimeConfig":
@@ -37,6 +41,9 @@ class PlatformRuntimeConfig:
             interaction=dict(row.interaction or {}),
             adapter_type=row.adapter_type or "generic",
             adapter_module=row.adapter_module or "",
+            execution_mode=getattr(row, "execution_mode", None) or "web_only",
+            api_provider=getattr(row, "api_provider", None) or "",
+            api_model=getattr(row, "api_model", None) or "",
         )
 
 

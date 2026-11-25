@@ -34,6 +34,9 @@ def platform_to_dict(row: PlatformConfigRow) -> dict[str, Any]:
         "adapter_type": row.adapter_type,
         "adapter_module": row.adapter_module,
         "expected_host": row.expected_host or "",
+        "execution_mode": row.execution_mode or "web_only",
+        "api_provider": row.api_provider or "",
+        "api_model": row.api_model or "",
     }
 
 

@@ -11,10 +11,12 @@ from oneqmultia.api.schemas import (
     PlatformImportBody,
     PlatformOut,
     PlatformPatchBody,
+    SelectorTestBody,
 )
 from oneqmultia.platform_manager import crud
 from oneqmultia.platform_manager.account_binder import bind_or_check_login, validate_and_store_url
 from oneqmultia.platform_manager.health_checker import run_health_check
+from oneqmultia.platform_manager.selector_tester import probe_selectors
 from oneqmultia.platform_manager.importer import (
     ImportValidationError,
     export_all_json,
@@ -180,6 +182,38 @@ def validate_platform_url_api(
     except ValueError:
         raise HTTPException(status_code=404, detail="platform not found")
     return _platform_account_payload(row)
+
+
+@router.post("/{platform_id}/test-selectors")
+async def test_platform_selectors(
+    platform_id: str,
+    body: SelectorTestBody,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict:
+    """在已打开的平台页上试选择器。未连接 CDP 时返回结构化未连接结果，而不是抛 500。"""
+    row = crud.get_platform(db, platform_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="platform not found")
+    selectors = dict(row.selectors or {})
+    selectors.update(body.selectors or {})
+    ctx = _cdp_context(request)
+    if ctx is None:
+        return {
+            "connected": False,
+            "platform_id": platform_id,
+            "fields": {
+                key: {"selector": selectors.get(key) or "", "count": 0, "visible": 0, "preview": "", "ok": False}
+                for key in ("input_box", "send_button", "response_container")
+            },
+            "message": "CDP 未连接，无法在真实页面上试选择器",
+        }
+    from oneqmultia.config.settings import Settings
+    from oneqmultia.core.dispatcher import _get_or_open_page
+
+    page = await _get_or_open_page(ctx, row.url, Settings())
+    fields = await probe_selectors(page, selectors)
+    return {"connected": True, "platform_id": platform_id, "fields": fields, "message": "已在当前页面试跑选择器"}
 
 
 @router.post("/{platform_id}/login/open")

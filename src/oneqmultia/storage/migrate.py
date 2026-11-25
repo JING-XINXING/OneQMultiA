@@ -20,6 +20,13 @@ _PLATFORM_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("url_checked_at", "DATETIME"),
     ("url_check_message", "TEXT DEFAULT ''"),
     ("expected_host", "VARCHAR(256) DEFAULT ''"),
+    ("execution_mode", "VARCHAR(32) DEFAULT 'web_only'"),
+    ("api_provider", "VARCHAR(64) DEFAULT ''"),
+    ("api_model", "VARCHAR(128) DEFAULT ''"),
+)
+
+_SESSION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("pinned", "BOOLEAN DEFAULT 0"),
 )
 
 # 问答表：缓存最优答案 JSON
@@ -51,6 +58,10 @@ def _schema_needs_alter(engine: Engine) -> bool:
         existing_qa = {col["name"] for col in inspector.get_columns("qa_pairs")}
         if any(name not in existing_qa for name, _ddl in _QA_NEW_COLUMNS):
             return True
+    if "sessions" in tables:
+        existing_sessions = {col["name"] for col in inspector.get_columns("sessions")}
+        if any(name not in existing_sessions for name, _ddl in _SESSION_NEW_COLUMNS):
+            return True
     return False
 
 
@@ -77,6 +88,11 @@ def migrate_schema(engine: Engine) -> None:
             added_qa = _add_missing_columns(conn, "qa_pairs", existing_qa, _QA_NEW_COLUMNS)
             if added_qa:
                 _log.info("已为 qa_pairs 增加列：%s", ", ".join(added_qa))
+        if "sessions" in tables:
+            existing_sessions = {col["name"] for col in inspector.get_columns("sessions")}
+            added_sessions = _add_missing_columns(conn, "sessions", existing_sessions, _SESSION_NEW_COLUMNS)
+            if added_sessions:
+                _log.info("已为 sessions 增加列：%s", ", ".join(added_sessions))
 
 
 def _backfill_expected_host(conn) -> None:
