@@ -18,6 +18,9 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # 中文 PDF 测试依赖可嵌入的 TTF。GitHub 镜像默认没有中文字体。
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-droid-fallback
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 

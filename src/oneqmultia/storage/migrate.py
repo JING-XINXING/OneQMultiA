@@ -29,6 +29,12 @@ _SESSION_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("pinned", "BOOLEAN DEFAULT 0"),
 )
 
+_SHARE_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("expires_at", "DATETIME"),
+    ("revoked_at", "DATETIME"),
+    ("view_count", "INTEGER DEFAULT 0"),
+)
+
 # 问答表：缓存最优答案 JSON
 _QA_NEW_COLUMNS: tuple[tuple[str, str], ...] = (
     ("optimal_answer", "JSON"),
@@ -62,6 +68,10 @@ def _schema_needs_alter(engine: Engine) -> bool:
         existing_sessions = {col["name"] for col in inspector.get_columns("sessions")}
         if any(name not in existing_sessions for name, _ddl in _SESSION_NEW_COLUMNS):
             return True
+    if "share_links" in tables:
+        existing_share = {col["name"] for col in inspector.get_columns("share_links")}
+        if any(name not in existing_share for name, _ddl in _SHARE_NEW_COLUMNS):
+            return True
     return False
 
 
@@ -93,6 +103,11 @@ def migrate_schema(engine: Engine) -> None:
             added_sessions = _add_missing_columns(conn, "sessions", existing_sessions, _SESSION_NEW_COLUMNS)
             if added_sessions:
                 _log.info("已为 sessions 增加列：%s", ", ".join(added_sessions))
+        if "share_links" in tables:
+            existing_share = {col["name"] for col in inspector.get_columns("share_links")}
+            added_share = _add_missing_columns(conn, "share_links", existing_share, _SHARE_NEW_COLUMNS)
+            if added_share:
+                _log.info("已为 share_links 增加列：%s", ", ".join(added_share))
 
 
 def _backfill_expected_host(conn) -> None:
