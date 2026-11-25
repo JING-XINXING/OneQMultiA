@@ -8,6 +8,11 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+from oneqmultia.core.access_guard import request_is_allowed
 
 from oneqmultia.api.export_routes import router as export_router
 from oneqmultia.api.platform_routes import router as platform_router
@@ -100,6 +105,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state._playwright.stop()
 
 
+class RemoteWriteGuard(BaseHTTPMiddleware):
+    """监听非本机地址时，平台修改和提问接口要求 Bearer 令牌。"""
+
+    async def dispatch(self, request: Request, call_next):
+        settings = Settings()
+        allowed = request_is_allowed(
+            request.method,
+            request.url.path,
+            request.headers.get("authorization", ""),
+            settings,
+        )
+        if not allowed:
+            return JSONResponse(status_code=401, content={"detail": "远程访问需要 Bearer 访问令牌"})
+        return await call_next(request)
+
+
 def create_app() -> FastAPI:
     settings = Settings()
     app = FastAPI(
@@ -108,6 +129,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     # React/Vite 本地开发、Streamlit、移动端 WebSocket 跨源
+    app.add_middleware(RemoteWriteGuard)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

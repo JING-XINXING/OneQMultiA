@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oneqmultia"
-version = "0.4.0"
+version = "1.0.0"
 description = "OneQMultiA — aggregate answers from multiple AI chat platforms"
 readme = "README.md"
 requires-python = ">=3.9"

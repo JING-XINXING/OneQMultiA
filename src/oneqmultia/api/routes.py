@@ -106,12 +106,14 @@ async def post_ask(
 
 
 @router.post("/sessions/{session_id}/share")
-def post_share(session_id: str, db: Session = Depends(get_db)) -> dict:
-    """生成只读分享链接 token。"""
+def post_share(session_id: str, ttl: str = "never", db: Session = Depends(get_db)) -> dict:
+    """生成只读分享链接。ttl 支持 24h、7d、30d、never。"""
     try:
-        token = create_share_link(db, session_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="session not found")
+        token = create_share_link(db, session_id, ttl=ttl)
+    except ValueError as exc:
+        if str(exc) == "session not found":
+            raise HTTPException(status_code=404, detail="session not found") from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "token": token,
         # 给人打开的是前端只读页；接口仍保留 api_path
@@ -239,6 +241,16 @@ def patch_session(session_id: str, body: SessionPatchBody, db: Session = Depends
         updated_at=row.updated_at,
         pinned=bool(row.pinned),
     )
+
+
+@router.post("/shares/{token}/revoke")
+def revoke_share(token: str, db: Session = Depends(get_db)) -> dict:
+    """吊销一条已发出的分享链接。"""
+    from oneqmultia.sharing.share_service import revoke_share_link
+
+    if not revoke_share_link(db, token):
+        raise HTTPException(status_code=404, detail="分享不存在")
+    return {"revoked": token}
 
 
 @router.delete("/sessions/{session_id}")

@@ -1,8 +1,10 @@
 """智能助手服务网址校验：格式、期望域名、可选网络可达性。"""
 
-from __future__ import annotations
+from __future__ import annotations  # 兼容 Python 3.9 的联合类型写法
 
+import ipaddress
 import logging
+import socket
 from dataclasses import dataclass
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -78,11 +80,66 @@ def validate_expected_host(url: str, expected_host: str) -> UrlCheckResult:
     )
 
 
+def _host_without_port(host: str) -> str:
+    """去掉 URL 主机里的端口。IPv6 字面量保持原样。"""
+    value = (host or "").strip().lower()
+    if value.startswith("[") and "]" in value:
+        return value[1:value.index("]")]
+    if value.count(":") == 1:
+        return value.split(":", 1)[0]
+    return value
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """回环、私网、链路本地和元数据地址都不能由服务端代为访问。"""
+    return bool(
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def ssrf_block_reason(url: str) -> str:
+    """若目标会落到本机或内网，返回原因；可以访问时返回空字符串。"""
+    host = _host_without_port(extract_host(url))
+    if not host:
+        return ""
+    if host in {"localhost", "metadata.google.internal"}:
+        return "禁止访问本机或云元数据地址"
+    literals: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    try:
+        literals.append(ipaddress.ip_address(host))
+    except ValueError:
+        literals = []
+    if any(_is_blocked_ip(ip) for ip in literals):
+        return "禁止访问内网或本机地址"
+    if literals:
+        return ""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return ""
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(ip):
+            return f"域名 {host} 解析到内网地址，已拦截"
+    return ""
+
+
 def check_url_reachable(url: str, timeout_sec: int = 12) -> UrlCheckResult:
     """发起 HTTP 请求确认网址可访问（不要求登录）。"""
     fmt = validate_url_format(url)
     if not fmt.ok:
         return fmt
+    blocked = ssrf_block_reason(fmt.final_url)
+    if blocked:
+        return UrlCheckResult(False, "invalid", blocked, final_url=fmt.final_url, host=fmt.host)
     req = Request(
         fmt.final_url,
         method="GET",
