@@ -44,6 +44,7 @@ export type QAPair = {
   question: string;
   question_time: string;
   answers: PlatformAnswer[];
+  optimal_answer?: OptimalAnswer;
 };
 
 export type SessionDetail = SessionSummary & {

@@ -39,8 +39,29 @@ def _add_missing_columns(conn, table: str, existing: set[str], columns: tuple[tu
     return added
 
 
+def _schema_needs_alter(engine: Engine) -> bool:
+    """是否存在尚未执行的 ADD COLUMN。有变更时才做热备。"""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "platform_configs" in tables:
+        existing = {col["name"] for col in inspector.get_columns("platform_configs")}
+        if any(name not in existing for name, _ddl in _PLATFORM_NEW_COLUMNS):
+            return True
+    if "qa_pairs" in tables:
+        existing_qa = {col["name"] for col in inspector.get_columns("qa_pairs")}
+        if any(name not in existing_qa for name, _ddl in _QA_NEW_COLUMNS):
+            return True
+    return False
+
+
 def migrate_schema(engine: Engine) -> None:
     """为已存在的表补齐缺失列，并回填 expected_host。"""
+    if _schema_needs_alter(engine):
+        # ALTER 前先热备，避免迁移失败后无法回到旧结构
+        from oneqmultia.storage.backup import backup_database
+
+        backup_database(engine, reason="migrate")
+
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 

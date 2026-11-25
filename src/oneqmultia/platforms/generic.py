@@ -22,6 +22,7 @@ from oneqmultia.platforms.base import (
     BasePlatformAdapter,
     PlatformRuntimeConfig,
 )
+from oneqmultia.platforms.markdown_extract import MARKDOWN_EXTRACT_JS
 from oneqmultia.storage.models import PlatformConfigRow
 
 logger = logging.getLogger(__name__)
@@ -178,11 +179,14 @@ async def _fill_input(page: Page, box, question: str, input_method: str) -> None
             await box.evaluate("el => el.focus()")
     method = (input_method or "keyboard").lower()
 
-    if method in ("keyboard", "type"):
-        await box.press("Control+a", timeout=_ACTION_MS)
-        await box.press("Backspace", timeout=_ACTION_MS)
-        type_ms = max(_ACTION_MS, len(question) * 20 + 5000)
-        await box.type(question, delay=15, timeout=type_ms)
+    if method in ("keyboard", "type", "insert"):
+        # 优先在元素上注入文本，不把窗口拉到前台，避免多平台抢焦点丢字
+        inserted = await _insert_text_without_window_focus(box, question)
+        if not inserted:
+            await box.press("Control+a", timeout=_ACTION_MS)
+            await box.press("Backspace", timeout=_ACTION_MS)
+            type_ms = max(_ACTION_MS, len(question) * 20 + 5000)
+            await box.type(question, delay=15, timeout=type_ms)
     else:
         await box.fill(question)
         await box.evaluate(
@@ -194,6 +198,35 @@ async def _fill_input(page: Page, box, question: str, input_method: str) -> None
 
     # 等框架状态更新后再发送
     await asyncio.sleep(0.35)
+
+
+async def _insert_text_without_window_focus(box, question: str) -> bool:
+    """用 DOM focus + insertText / value 写入，不依赖操作系统窗口焦点。"""
+    try:
+        ok = await box.evaluate(
+            """(el, text) => {
+                el.focus();
+                if (el.isContentEditable) {
+                    const sel = window.getSelection();
+                    const range = document.createRange();
+                    range.selectNodeContents(el);
+                    sel.removeAllRanges();
+                    sel.addRange(range);
+                    const inserted = document.execCommand("insertText", false, text);
+                    if (!inserted) el.textContent = text;
+                } else {
+                    el.value = text;
+                }
+                el.dispatchEvent(new InputEvent("input", {bubbles: true, data: text, inputType: "insertText"}));
+                el.dispatchEvent(new Event("change", {bubbles: true}));
+                return true;
+            }""",
+            question,
+        )
+        return bool(ok)
+    except Exception:
+        logger.debug("DOM insertText failed", exc_info=True)
+        return False
 
 
 async def _send_message(page: Page, box, send_sel: str, send_method: str) -> None:
@@ -226,8 +259,22 @@ async def _count_responses(page: Page, response_sel: str) -> int:
         return 0
 
 
+async def _extract_markdown(locator) -> str:
+    """把定位到的 DOM 转成 Markdown；失败时退回纯文本。"""
+    try:
+        md = await locator.evaluate(MARKDOWN_EXTRACT_JS)
+        if isinstance(md, str) and md.strip():
+            return md.strip()
+    except Exception:
+        logger.debug("markdown extract failed, fallback to inner_text", exc_info=True)
+    try:
+        return (await locator.inner_text()).strip()
+    except Exception:
+        return ""
+
+
 async def _tail_text(page: Page, sel: str) -> str:
-    """读取某选择器最后一条可见文本，供发送前后对比。"""
+    """读取某选择器最后一条 Markdown/文本，供发送前后对比。"""
     if not sel:
         return ""
     try:
@@ -235,9 +282,15 @@ async def _tail_text(page: Page, sel: str) -> str:
         n = await loc.count()
         if n <= 0:
             return ""
-        return (await loc.nth(n - 1).inner_text()).strip()
+        return await _extract_markdown(loc.nth(n - 1))
     except Exception:
         return ""
+
+
+def _mark_first_token(timing: AskTiming) -> None:
+    """只在真正出现非思考态新文本时记录一次首字时间。"""
+    if timing.first_token_at is None:
+        timing.first_token_at = datetime.now(timezone.utc)
 
 
 async def _get_response_text(
@@ -248,6 +301,7 @@ async def _get_response_text(
     timeout_seconds: float,
     emit,
     pre_fallback_texts: Optional[dict] = None,
+    timing: Optional[AskTiming] = None,
 ) -> str:
     """
     轮询等待新回答：节点变多，或最后一条相对发送前发生变化。
@@ -265,11 +319,14 @@ async def _get_response_text(
         try:
             curr_count = await loc.count()
             if curr_count > 0:
-                txt = (await loc.nth(curr_count - 1).inner_text()).strip()
+                txt = await _extract_markdown(loc.nth(curr_count - 1))
                 if is_new_answer(curr_count, pre_count, txt, pre_last_text):
                     if txt != last_text:
                         last_text = txt
                         stable_count = 0
+                        # 思考占位不算首字，避免 TTFT 记到本地填框时刻
+                        if timing is not None and not _looks_incomplete(txt):
+                            _mark_first_token(timing)
                         await _emit_progress(emit, {"type": "answer_delta", "preview": txt[:12000]})
                     elif _looks_incomplete(txt):
                         stable_count = 0
@@ -294,6 +351,8 @@ async def _get_response_text(
             pre_txt = pre_fallback_texts.get(fallback_sel, "")
             if txt and txt != pre_txt and not _looks_incomplete(txt):
                 logger.info("使用备用响应选择器 %r 捕获到文本", fallback_sel)
+                if timing is not None:
+                    _mark_first_token(timing)
                 await _emit_progress(emit, {"type": "answer_delta", "preview": txt[:12000]})
                 return txt
         except Exception:
@@ -303,21 +362,107 @@ async def _get_response_text(
 
 
 class GenericAdapter(BasePlatformAdapter):
-    """配置驱动的通用网页聊天适配器。"""
+    """配置驱动的通用网页聊天适配器。
+
+    ask() 按固定生命周期调用可覆写钩子，专用适配器只需改前置步骤：
+    prepare_page → ensure_conversation_mode → locate_input → fill_question
+    → submit_question → stream_response。
+    """
+
+    def __init__(self, config: PlatformRuntimeConfig) -> None:
+        super().__init__(config)
+        # 调度器在会话首问时置 True，用于点击 new_chat_button
+        self.is_first_in_session: bool = False
+        # 提交完成时刻，测试用来断言 TTFT 晚于发送
+        self.last_submit_at: Optional[datetime] = None
+
+    async def prepare_page(self, page: Page) -> None:
+        """发送前的页面准备。专用适配器覆写此钩子，默认不做额外操作。"""
+        return None
+
+    async def ensure_conversation_mode(self, page: Page) -> None:
+        """会话首问时点击新对话按钮，避免沿用上一次页面上下文。"""
+        if not self.is_first_in_session:
+            return
+        sel = (self.config.selectors or {}).get("new_chat_button") or ""
+        if not sel:
+            return
+        try:
+            btn = page.locator(sel).first
+            if await btn.count() and await btn.is_visible():
+                await btn.click(timeout=3000)
+                await asyncio.sleep(0.2)
+        except Exception:
+            logger.debug("[%s] 新对话按钮未点击", self.config.id, exc_info=True)
+
+    async def locate_input(self, page: Page):
+        """定位输入框；停在首页时先拉回配置的对话入口再试一次。"""
+        sel = self.config.selectors or {}
+        input_sel = sel.get("input_box") or ""
+        timeout_ms = max(1000, self.config.timeout_seconds * 1000)
+        try:
+            return await _find_input_box(page, input_sel, timeout_ms)
+        except PlaywrightTimeoutError:
+            if should_open_entry_url(page.url, self.config.url):
+                logger.info("[%s] 输入框未找到，导航到对话入口 %s", self.config.id, self.config.url)
+                await page.goto(self.config.url, wait_until="domcontentloaded", timeout=timeout_ms)
+                return await _find_input_box(page, input_sel, timeout_ms)
+            raise
+
+    async def fill_question(self, page: Page, box, question: str) -> None:
+        """按 interaction.input_method 写入问题。"""
+        input_method = ((self.config.interaction or {}).get("input_method") or "keyboard").lower()
+        await _fill_input(page, box, question, input_method)
+
+    async def submit_question(self, page: Page, box) -> None:
+        """点击发送或回车。成功调用后记录 last_submit_at。"""
+        sel = self.config.selectors or {}
+        send_method = ((self.config.interaction or {}).get("send_method") or "click").lower()
+        await _send_message(page, box, sel.get("send_button") or "", send_method)
+        self.last_submit_at = datetime.now(timezone.utc)
+
+    async def send_question(self, page: Page, question: str) -> None:
+        """兼容入口：定位、填充、提交。专用适配器可覆写后再调用 super()。"""
+        box = await self.locate_input(page)
+        await self.fill_question(page, box, question)
+        await self.submit_question(page, box)
+
+    async def stream_response(
+        self,
+        page: Page,
+        emit,
+        timing: AskTiming,
+        pre_count: int,
+        pre_last: str,
+        pre_fallback: dict,
+    ) -> str:
+        """轮询新回答。首个非思考态字符到达时写入 timing.first_token_at。"""
+        response_sel = (self.config.selectors or {}).get("response_container") or ""
+        timeout_ms = max(1000, self.config.timeout_seconds * 1000)
+        if not response_sel:
+            await asyncio.sleep(2)
+            await _emit_progress(emit, {"type": "answer_delta", "preview": ""})
+            return ""
+        try:
+            await page.wait_for_selector(response_sel, timeout=min(20000, timeout_ms))
+        except PlaywrightTimeoutError:
+            logger.warning("[%s] 等待响应区域 %r 超时，继续轮询", self.config.id, response_sel)
+        return await _get_response_text(
+            page,
+            response_sel,
+            pre_count,
+            pre_last,
+            self.config.timeout_seconds,
+            emit,
+            pre_fallback_texts=pre_fallback,
+            timing=timing,
+        )
 
     async def ask(self, page: Page, question: str, emit=None) -> AskResult:
         timing = AskTiming()
+        # 记录调度开始时间；真正的首字时间在 stream_response 里写入
         timing.request_sent_at = datetime.now(timezone.utc)
-        sel = self.config.selectors
-        inter = self.config.interaction
-        input_method = (inter.get("input_method") or "keyboard").lower()
-        send_method = (inter.get("send_method") or "click").lower()
-        timeout_ms = max(1000, self.config.timeout_seconds * 1000)
-
-        input_sel = sel.get("input_box") or ""
-        send_sel = sel.get("send_button") or ""
-        response_sel = sel.get("response_container") or ""
-
+        input_sel = (self.config.selectors or {}).get("input_box") or ""
         if not input_sel:
             timing.completed_at = datetime.now(timezone.utc)
             return AskResult(
@@ -331,77 +476,33 @@ class GenericAdapter(BasePlatformAdapter):
             )
 
         try:
-            # ── 1. 在发送前记录已有响应（节点数 + 末条文本，兼容原地更新）──
+            response_sel = (self.config.selectors or {}).get("response_container") or ""
+            # 发送前快照，避免复用 Tab 时把上一轮回答当成新回答
             pre_count = await _count_responses(page, response_sel)
             pre_last = await _tail_text(page, response_sel)
-            pre_fallback = {sel: await _tail_text(page, sel) for sel in _FALLBACK_RESPONSE_SELECTORS}
+            pre_fallback = {sel_name: await _tail_text(page, sel_name) for sel_name in _FALLBACK_RESPONSE_SELECTORS}
 
-            # ── 2. 查找输入框；停在首页时先拉回对话入口再试一次 ──────────
-            try:
-                box = await _find_input_box(page, input_sel, timeout_ms)
-            except PlaywrightTimeoutError:
-                if should_open_entry_url(page.url, self.config.url):
-                    logger.info("[%s] 输入框未找到，导航到对话入口 %s", self.config.id, self.config.url)
-                    await page.goto(self.config.url, wait_until="domcontentloaded", timeout=timeout_ms)
-                    box = await _find_input_box(page, input_sel, timeout_ms)
-                else:
-                    raise
-
-            # ── 3. 填充文本（触发框架合成事件）──────────────────────────
-            await _fill_input(page, box, question, input_method)
-            timing.first_token_at = datetime.now(timezone.utc)
-
-            # ── 4. 发送 ────────────────────────────────────────────────
-            await _send_message(page, box, send_sel, send_method)
-
-            # ── 5. 无响应选择器：直接等 2s 返回 ─────────────────────────
-            if not response_sel:
-                await asyncio.sleep(2)
-                timing.completed_at = datetime.now(timezone.utc)
-                await _emit_progress(emit, {"type": "answer_delta", "preview": ""})
-                return AskResult(
-                    platform_id=self.config.id,
-                    platform_name=self.config.display_name,
-                    platform_url=self.config.url,
-                    answer_text="",
-                    status="success",
-                    error_message="",
-                    timing=timing,
-                )
-
-            # ── 6. 等待响应区域首次出现 ──────────────────────────────────
-            try:
-                await page.wait_for_selector(response_sel, timeout=min(20000, timeout_ms))
-            except PlaywrightTimeoutError:
-                logger.warning("[%s] 等待响应区域 %r 超时，继续轮询", self.config.id, response_sel)
-
-            # ── 7. 轮询直到响应稳定 ──────────────────────────────────────
-            text = await _get_response_text(
-                page,
-                response_sel,
-                pre_count,
-                pre_last,
-                self.config.timeout_seconds,
-                emit,
-                pre_fallback_texts=pre_fallback,
-            )
+            await self.prepare_page(page)
+            await self.ensure_conversation_mode(page)
+            box = await self.locate_input(page)
+            await self.fill_question(page, box, question)
+            await self.submit_question(page, box)
+            text = await self.stream_response(page, emit, timing, pre_count, pre_last, pre_fallback)
 
             timing.completed_at = datetime.now(timezone.utc)
-            await _emit_progress(emit, {"type": "answer_delta", "preview": text[:12000]})
-
+            await _emit_progress(emit, {"type": "answer_delta", "preview": (text or "")[:12000]})
             return AskResult(
                 platform_id=self.config.id,
                 platform_name=self.config.display_name,
                 platform_url=self.config.url,
                 answer_text=text,
-                status="success" if text else "timeout",
+                status="success" if text or not response_sel else "timeout",
                 error_message=(
-                    "" if text
+                    "" if text or not response_sel
                     else "未检测到回答文本（响应区域为空或选择器不匹配，请通过 PATCH /api/platforms 更新 response_container）"
                 ),
                 timing=timing,
             )
-
         except PlaywrightTimeoutError as e:
             timing.completed_at = datetime.now(timezone.utc)
             return AskResult(

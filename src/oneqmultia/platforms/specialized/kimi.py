@@ -6,11 +6,14 @@ from oneqmultia.platforms.generic import GenericAdapter
 
 
 class KimiAdapter(GenericAdapter):
-    """Kimi 页面：发送前滚动到底部输入区。"""
+    """发送前滚到页面底部，让输入区进入可视区域。"""
 
-    async def send_question(self, page: Page, question: str) -> None:
+    async def prepare_page(self, page: Page) -> None:
         try:
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         except Exception:
             pass
+
+    async def send_question(self, page: Page, question: str) -> None:
+        await self.prepare_page(page)
         await super().send_question(page, question)

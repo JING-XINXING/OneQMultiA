@@ -21,7 +21,8 @@ from urllib.parse import urlparse
 from oneqmultia.config.settings import ensure_data_dir
 from oneqmultia.platform_manager.seed import load_yaml_platforms, seed_platforms_if_empty
 from oneqmultia.storage import init_db
-from oneqmultia.storage.database import SessionLocal
+from oneqmultia.storage.backup import backup_database
+from oneqmultia.storage.database import SessionLocal, engine
 from oneqmultia.storage.models import PlatformConfigRow
 
 
@@ -49,6 +50,9 @@ def run(dry_run: bool = True, full: bool = False) -> None:
     init_db()
     db = SessionLocal()
     try:
+        if not dry_run:
+            # 同步或清空前先热备，避免误操作丢掉已有平台配置
+            backup_database(engine, reason="reset_full" if full else "reset_apply")
         if full:
             n = seed_platforms_if_empty(db, force=True)
             print(f"[full] 已清空并重新 seed {n} 个平台。")

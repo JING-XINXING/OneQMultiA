@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from playwright.async_api import BrowserContext
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from oneqmultia.api.schemas import (
@@ -31,6 +32,7 @@ from oneqmultia.core.session_manager import (
 )
 from oneqmultia.sharing.share_service import create_share_link
 from oneqmultia.storage.database import get_db
+from oneqmultia.storage.models import QAPairRow
 
 router = APIRouter(tags=["qa"])
 
@@ -71,7 +73,11 @@ async def post_ask(
 
     qa = add_qa_pair(db, session_id, body.question)
     ctx = _browser_context(request)
-    results = await dispatch_to_adapters(adapters, body.question, ctx)
+    # 本轮是该会话第一条问题时，适配器会尝试打开新对话
+    is_first = _is_first_question(db, session_id)
+    results = await dispatch_to_adapters(
+        adapters, body.question, ctx, is_first_in_session=is_first
+    )
     rows = persist_answers(db, qa, results)
     summary = summarize_results(results)
     return AskResponse(
@@ -90,8 +96,18 @@ def post_share(session_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="session not found")
     return {
         "token": token,
-        "url_path": f"/api/public/share/{token}",
+        # 给人打开的是前端只读页；接口仍保留 api_path
+        "url_path": f"/share/{token}",
+        "api_path": f"/api/public/share/{token}",
     }
+
+
+def _is_first_question(db: Session, session_id: str) -> bool:
+    """当前会话是否只有刚写入的这一条提问。"""
+    count = db.scalar(
+        select(func.count()).select_from(QAPairRow).where(QAPairRow.session_id == session_id)
+    )
+    return int(count or 0) <= 1
 
 
 def _same_llm_choice(cached: dict, provider: str, model: str) -> bool:

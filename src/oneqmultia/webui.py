@@ -32,6 +32,11 @@ def mount_frontend(app: FastAPI, dist_dir: Optional[Path] = None) -> bool:
     def spa_index() -> FileResponse:
         return FileResponse(index_file, media_type="text/html")
 
+    @app.get("/share/{token}", include_in_schema=False)
+    def spa_share(token: str) -> FileResponse:
+        """分享链接走前端只读页，而不是裸 JSON。"""
+        return FileResponse(index_file, media_type="text/html")
+
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets)), name="spa-assets")

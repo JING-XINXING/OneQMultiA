@@ -27,7 +27,7 @@ platforms:
       # 新版 ChatGPT 回复在 [data-message-author-role="assistant"] 下的 .markdown/.prose
       response_container: '[data-message-author-role="assistant"] .markdown, [data-message-author-role="assistant"] .prose, [data-message-author-role="assistant"]'
       response_complete: ""
-      new_chat_button: ""
+      new_chat_button: "a[data-testid='create-new-chat-button'], button[aria-label='New chat'], button[aria-label='新聊天'], a[href='/']"
     interaction:
       input_method: keyboard
       send_method: click
@@ -180,7 +180,7 @@ platforms:
       send_button: "div[role='button'][aria-label*='Send'], div[role='button'][aria-label*='发送'], button[type='submit']"
       response_container: ".ds-markdown, .markdown, [class*='markdown']"
       response_complete: ""
-      new_chat_button: ""
+      new_chat_button: "a[href='/'], button[aria-label*='New chat'], button[aria-label*='新对话']"
     interaction:
       input_method: keyboard
       send_method: enter
@@ -267,7 +267,7 @@ platforms:
       send_button: "button[type='submit'], button[aria-label*='发送']"
       response_container: "[class*='msh-chat-message']:last-child, [class*='message-content'], .markdown, article"
       response_complete: ""
-      new_chat_button: ""
+      new_chat_button: "a[href='/'], button[aria-label*='新对话'], button[aria-label*='New chat']"
     interaction:
       input_method: keyboard
       send_method: enter

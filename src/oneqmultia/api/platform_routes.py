@@ -15,7 +15,11 @@ from oneqmultia.api.schemas import (
 from oneqmultia.platform_manager import crud
 from oneqmultia.platform_manager.account_binder import bind_or_check_login, validate_and_store_url
 from oneqmultia.platform_manager.health_checker import run_health_check
-from oneqmultia.platform_manager.importer import export_all_json, import_json_replace
+from oneqmultia.platform_manager.importer import (
+    ImportValidationError,
+    export_all_json,
+    import_json_replace,
+)
 from oneqmultia.storage.database import get_db
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
@@ -78,7 +82,11 @@ def import_platforms(body: PlatformImportBody, db: Session = Depends(get_db)) ->
     import json
 
     payload = json.dumps(body.platforms, ensure_ascii=False)
-    n = import_json_replace(db, payload)
+    try:
+        n = import_json_replace(db, payload)
+    except ImportValidationError as exc:
+        # 校验失败时旧平台仍在，调用方应看到 422 而不是部分写入
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"imported": n}
 
 

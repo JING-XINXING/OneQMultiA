@@ -7,6 +7,7 @@
 # 用法：
 #   ./scripts/start_chrome_cdp.sh                 # 端口 9222，默认 profile 目录
 #   ONEQMULTIA_CDP_PORT=9333 ./scripts/start_chrome_cdp.sh   # 自定义端口
+#   ONEQMULTIA_CHROME=/path/to/chrome ./scripts/start_chrome_cdp.sh
 #
 # 注意：变量引用统一用 ${VAR} 花括号形式，避免变量名紧跟全角标点(如 ，) 时
 #       被 bash 误并入变量名，触发 set -u 的 "unbound variable" 报错。
@@ -14,11 +15,37 @@ set -euo pipefail
 
 PORT="${ONEQMULTIA_CDP_PORT:-9222}"
 PROFILE_DIR="${ONEQMULTIA_CHROME_PROFILE:-$HOME/chrome-oneqmultia-profile}"
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# macOS 用应用包路径，Linux 在 PATH 里找 Chrome/Chromium，也可用 ONEQMULTIA_CHROME 指定。
+find_chrome() {
+  if [[ -n "${ONEQMULTIA_CHROME:-}" && -x "${ONEQMULTIA_CHROME}" ]]; then
+    echo "${ONEQMULTIA_CHROME}"
+    return 0
+  fi
+  local uname_s
+  uname_s="$(uname -s)"
+  if [[ "${uname_s}" == "Darwin" ]]; then
+    echo "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    return 0
+  fi
+  local candidate
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser google-chrome-beta; do
+    if command -v "${candidate}" >/dev/null 2>&1; then
+      command -v "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! CHROME="$(find_chrome)"; then
+  echo "未找到 Chrome/Chromium。请安装浏览器，或设置 ONEQMULTIA_CHROME 为可执行文件路径。"
+  exit 1
+fi
 
 if [[ ! -x "${CHROME}" ]]; then
   echo "未找到 Chrome：${CHROME}"
-  echo "如安装在别处，请修改本脚本的 CHROME 变量。"
+  echo "如安装在别处，请设置环境变量 ONEQMULTIA_CHROME。"
   exit 1
 fi
 
@@ -30,6 +57,7 @@ fi
 
 mkdir -p "${PROFILE_DIR}"
 echo "启动调试版 Chrome。端口=${PORT}  profile=${PROFILE_DIR}"
+echo "浏览器：${CHROME}"
 echo "首次使用请在弹出窗口里登录 ChatGPT / DeepSeek / Kimi 等目标站点。"
 echo "请保持此 Chrome 常驻；关闭它会断开 CDP 连接。"
 
