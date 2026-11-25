@@ -141,6 +141,8 @@ class QAPairOut(BaseModel):
     question: str
     question_time: datetime
     answers: List[AnswerOut] = []
+    # 分享页需要展示已缓存的最优解；没有缓存时为空
+    optimal_answer: Optional[Dict[str, Any]] = None
 
 
 class SessionSummary(BaseModel):

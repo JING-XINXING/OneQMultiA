@@ -34,8 +34,8 @@ def get_platform(db: Session, platform_id: str) -> Optional[PlatformConfigRow]:
     return db.get(PlatformConfigRow, platform_id)
 
 
-def create_platform(db: Session, data: dict[str, Any]) -> PlatformConfigRow:
-    """新增平台。"""
+def create_platform(db: Session, data: dict[str, Any], *, commit: bool = True) -> PlatformConfigRow:
+    """新增平台。commit=False 时留给调用方放进同一个事务。"""
     row = PlatformConfigRow(
         id=data["id"],
         display_name=data["display_name"],
@@ -57,8 +57,9 @@ def create_platform(db: Session, data: dict[str, Any]) -> PlatformConfigRow:
         expected_host=data.get("expected_host") or _host_from_url(data.get("url") or ""),
     )
     db.add(row)
-    db.commit()
-    db.refresh(row)
+    if commit:
+        db.commit()
+        db.refresh(row)
     return row
 
 

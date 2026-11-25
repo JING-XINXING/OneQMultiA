@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # 连接已登录 Chrome：chrome --remote-debugging-port=9222
     cdp_url: Optional[str] = None
     api_title: str = "OneQMultiA API"
-    api_version: str = "0.2.0"
+    api_version: str = "0.3.0"
     # 打开平台首页的最大等待（毫秒）；跨境或弱网可调大，如 120000
     goto_timeout_ms: int = 90000
     # domcontentloaded：常规；commit：首包即继续（适合极慢/挂起在加载条的 SPA，后续 ask 仍可能失败）

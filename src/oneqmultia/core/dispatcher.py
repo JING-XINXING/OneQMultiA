@@ -63,6 +63,40 @@ def _format_dispatch_error(exc: BaseException) -> str:
     return raw
 
 
+# 同一主域串行，避免两个协程同时写同一个 Page
+_domain_locks: Dict[str, asyncio.Lock] = {}
+_domain_lock_guard = asyncio.Lock()
+# 正在被某个协程占用的 Page 对象 id
+_in_use_pages: Set[int] = set()
+
+
+def _host_key(url: str) -> str:
+    """归一化主域，作为同域互斥锁的键。"""
+    try:
+        return urlparse(url).netloc.removeprefix("www.").lower()
+    except Exception:
+        return url or ""
+
+
+async def _lock_for_host(url: str) -> asyncio.Lock:
+    """按主域取（或创建）一把锁。"""
+    key = _host_key(url) or url
+    async with _domain_lock_guard:
+        lock = _domain_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _domain_locks[key] = lock
+        return lock
+
+
+def _iter_open_pages(context: BrowserContext) -> List[Page]:
+    """只接受真实的 pages 列表。MagicMock 等测试替身不当成已打开 Tab。"""
+    raw = getattr(context, "pages", None)
+    if isinstance(raw, (list, tuple)):
+        return list(raw)
+    return []
+
+
 def _domain_match(url_a: str, url_b: str) -> bool:
     """判断两个 URL 是否属于同一域名（忽略 www. 前缀）。"""
     def _netloc(u: str) -> str:
@@ -86,19 +120,21 @@ async def _get_or_open_page(
 
     问答结束后不关闭页面，方便用户对照原始回答；下次同域提问会复用。
     """
-    for page in context.pages:
+    for page in _iter_open_pages(context):
         try:
             page_url = page.url
         except Exception:
             # Tab 可能已被关闭或不可访问
             continue
-        if not page_url or page_url.startswith(("about:", "chrome:", "data:", "blob:")):
+        if not isinstance(page_url, str) or not page_url or page_url.startswith(("about:", "chrome:", "data:", "blob:")):
+            continue
+        if id(page) in _in_use_pages:
+            # 同一 Page 已被其他协程占用，继续找或稍后新建
             continue
         if _domain_match(page_url, url):
             logger.debug("复用已有 Tab: %s", page_url)
             try:
-                # 验证 Tab 仍然可用
-                await page.bring_to_front()
+                # 常规问答不再 bring_to_front，避免多 Tab 抢焦点丢字
                 # 停在官网首页时拉回 /chat、/home 等对话入口，避免找不到提问框
                 if should_open_entry_url(page_url, url):
                     logger.info("复用 Tab 不在对话入口，导航到 %s", url)
@@ -163,6 +199,7 @@ async def dispatch_to_adapters(
     context: Optional[BrowserContext],
     progress: ProgressFn = None,
     cancel_state: Optional[CancelState] = None,
+    is_first_in_session: bool = False,
 ) -> List[AskResult]:
     """
     并发对每个适配器执行问答。
@@ -242,9 +279,20 @@ async def dispatch_to_adapters(
             })
 
         try:
-            page = await _get_or_open_page(context, adapter.config.url, settings)
-            emit: ProgressEmit = child_emit if progress else None
-            result = await _run_ask(adapter, page, emit)
+            # 同域串行 + Page 租约：同一时刻同一页面只允许一个协程写入
+            domain_lock = await _lock_for_host(adapter.config.url)
+            async with domain_lock:
+                page = await _get_or_open_page(context, adapter.config.url, settings)
+                page_key = id(page)
+                while page_key in _in_use_pages:
+                    await asyncio.sleep(0.05)
+                _in_use_pages.add(page_key)
+                try:
+                    setattr(adapter, "is_first_in_session", is_first_in_session)
+                    emit: ProgressEmit = child_emit if progress else None
+                    result = await _run_ask(adapter, page, emit)
+                finally:
+                    _in_use_pages.discard(page_key)
             await _prog(_result_to_event(result))
             return result
         except asyncio.CancelledError:

@@ -1,4 +1,4 @@
-"""ChatGPT 专用适配器：在 GenericAdapter 基础上增加 ProseMirror 输入优化。"""
+"""ChatGPT 专用适配器：在通用生命周期上补 ProseMirror 输入区准备。"""
 
 from playwright.async_api import Page
 
@@ -6,10 +6,10 @@ from oneqmultia.platforms.generic import GenericAdapter
 
 
 class ChatGPTAdapter(GenericAdapter):
-    """ChatGPT 页面使用 ProseMirror，keyboard 输入已在 GenericAdapter 中处理。"""
+    """发送前先点中可见的 composer，避免打进隐藏副本。"""
 
-    async def send_question(self, page: Page, question: str) -> None:
-        # 优先点击输入区获取焦点，再调用通用发送逻辑
+    async def prepare_page(self, page: Page) -> None:
+        # ask() 会调用本钩子；旧的 send_question 覆写因此不再是死代码路径
         for sel in (
             "div#prompt-textarea",
             "#prompt-textarea",
@@ -22,4 +22,8 @@ class ChatGPTAdapter(GenericAdapter):
                     break
             except Exception:
                 continue
+
+    async def send_question(self, page: Page, question: str) -> None:
+        """保留显式入口：先准备页面，再走通用填充与提交。"""
+        await self.prepare_page(page)
         await super().send_question(page, question)

@@ -40,12 +40,17 @@ export function useWebSocketAsk() {
   const reconnectCount = useRef(0);
   const userStoppedRef = useRef(false);
   const lastSummaryRef = useRef<Record<string, unknown> | null>(null);
+  // 已拿到 qa_pair_id 后，重连改为 subscribe，避免再插入一条提问
+  const qaIdRef = useRef<string | null>(null);
+  const modeRef = useRef<"ask" | "subscribe">("ask");
 
   const clear = useCallback(() => {
     setEvents([]);
     setLastSummary(null);
     lastSummaryRef.current = null;
     setLastQaPairId(null);
+    qaIdRef.current = null;
+    modeRef.current = "ask";
   }, []);
 
   const finishAsk = useCallback(() => {
@@ -63,6 +68,10 @@ export function useWebSocketAsk() {
     ws.onopen = () => {
       setConnected(true);
       reconnectCount.current = 0;
+      if (modeRef.current === "subscribe" && qaIdRef.current) {
+        ws.send(JSON.stringify({ action: "subscribe", qa_pair_id: qaIdRef.current }));
+        return;
+      }
       ws.send(
         JSON.stringify({
           action: "ask",
@@ -77,7 +86,10 @@ export function useWebSocketAsk() {
       try {
         const msg = JSON.parse(ev.data as string) as WsEvent;
         setEvents((prev) => [...prev, msg]);
-        if (msg.type === "qa_pair") setLastQaPairId(msg.qa_pair_id);
+        if (msg.type === "qa_pair") {
+          setLastQaPairId(msg.qa_pair_id);
+          qaIdRef.current = msg.qa_pair_id;
+        }
         if (msg.type === "complete") {
           setLastSummary(msg.summary);
           lastSummaryRef.current = msg.summary;
@@ -105,6 +117,7 @@ export function useWebSocketAsk() {
       }
       if (payloadRef.current && reconnectCount.current < MAX_RECONNECT) {
         reconnectCount.current += 1;
+        if (qaIdRef.current) modeRef.current = "subscribe";
         setTimeout(connectAndSend, RECONNECT_MS);
       } else {
         finishAsk();

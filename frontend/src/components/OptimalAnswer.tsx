@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MarkdownView } from "./MarkdownView";
 import type { LlmStatus, OptimalAnswer as OptimalAnswerData } from "../types/api";
 
 type Props = {
@@ -87,7 +88,9 @@ export function OptimalAnswer({ data, loading, asking, llmStatus, onRegenerate }
         <p className="mt-3 text-sm font-medium leading-relaxed text-amber-950/80">{data.summary}</p>
       )}
 
-      <div className="optimal-body mt-4 whitespace-pre-wrap break-words">{data?.text}</div>
+      <div className="optimal-body mt-4">
+        <MarkdownView text={data?.text || ""} />
+      </div>
 
       {!fromLlm && !llmStatus?.configured && (
         <p className="mt-3 text-[11px] leading-relaxed text-amber-900/60">

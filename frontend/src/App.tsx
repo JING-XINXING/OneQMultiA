@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MobileExportSheet } from "./components/MobileExportSheet";
 import { MobileNav } from "./components/MobileNav";
+import { SharePage } from "./components/SharePage";
 import { SessionHistory } from "./components/SessionHistory";
 import { AskWorkspace } from "./components/dashboard/AskWorkspace";
 import { DashboardHeader } from "./components/dashboard/DashboardHeader";
@@ -18,7 +20,14 @@ import type { CompareResult, LlmChoice, LlmStatus, Platform, PlatformAnswer, QAP
 
 type Tab = "ask" | "history" | "platforms";
 
+function readShareToken(): string {
+  const matched = window.location.pathname.match(/^\/share\/([^/]+)\/?$/);
+  if (matched) return decodeURIComponent(matched[1]);
+  return new URLSearchParams(window.location.search).get("share") || "";
+}
+
 export default function App() {
+  const shareToken = readShareToken();
   const { isMobile } = useResponsive();
   const { canInstall, install } = usePWA();
   const [tab, setTab] = useState<Tab>("ask");
@@ -378,6 +387,10 @@ export default function App() {
     if (hasAnswers && !asking) void regenerateOptimal(choice);
   }
 
+  if (shareToken) {
+    return <SharePage token={shareToken} />;
+  }
+
   const header = (
     <DashboardHeader
       connected={asking || connected}
@@ -464,7 +477,12 @@ export default function App() {
   return (
     <>
       {isMobile ? (
-        <MobileLayout header={header}>{mainContent}</MobileLayout>
+        <MobileLayout header={
+          <div className="flex w-full items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">{header}</div>
+            <MobileExportSheet sessionId={sessionId} onShare={setShareUrl} />
+          </div>
+        }>{mainContent}</MobileLayout>
       ) : (
         <DesktopLayout sidebar={sidebar} header={header}>{mainContent}</DesktopLayout>
       )}

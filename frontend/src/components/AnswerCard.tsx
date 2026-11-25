@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { friendlyError } from "../lib/friendlyError";
 import { TimingBadge } from "./TimingBadge";
+import { MarkdownView } from "./MarkdownView";
 import type { PlatformAnswer } from "../types/api";
 
 type Props = {
@@ -51,12 +52,14 @@ export function AnswerCard({ answer, preview, onCancel }: Props) {
         </div>
       )}
       {!failed && (
-        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-600">
-          {shown || (answer.status === "success" ? "（空回答）" : "…")}
+        <div className="text-sm leading-relaxed text-slate-600">
+          {shown ? <MarkdownView text={shown} /> : answer.status === "success" ? "（空回答）" : "…"}
         </div>
       )}
       {failed && text && answer.status === "timeout" && (
-        <div className="text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-500">{shown}</div>
+        <div className="text-sm leading-relaxed text-slate-500">
+          <MarkdownView text={shown} />
+        </div>
       )}
       {long && !failed && (
         <button type="button" className="mt-2 text-[11px] font-medium text-accent" onClick={() => setExpanded((v) => !v)}>
