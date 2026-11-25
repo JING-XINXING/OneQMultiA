@@ -54,6 +54,10 @@ class PlatformConfigRow(Base):
     url_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     url_check_message: Mapped[str] = mapped_column(Text, default="")
     expected_host: Mapped[str] = mapped_column(String(256), default="")
+    # web_only：只走网页；api_only：只走官方 API；web_with_api_fallback：网页失败后降级
+    execution_mode: Mapped[str] = mapped_column(String(32), default="web_only")
+    api_provider: Mapped[str] = mapped_column(String(64), default="")
+    api_model: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -69,6 +73,7 @@ class SessionRow(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     title: Mapped[str] = mapped_column(String(512), default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

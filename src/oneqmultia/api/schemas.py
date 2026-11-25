@@ -43,6 +43,9 @@ class PlatformCreateBody(BaseModel):
     adapter_type: str = "generic"
     adapter_module: str = ""
     expected_host: str = ""
+    execution_mode: str = "web_only"
+    api_provider: str = ""
+    api_model: str = ""
 
     @field_validator("url")
     @classmethod
@@ -66,6 +69,9 @@ class PlatformPatchBody(BaseModel):
     adapter_type: Optional[str] = None
     adapter_module: Optional[str] = None
     expected_host: Optional[str] = None
+    execution_mode: Optional[str] = None
+    api_provider: Optional[str] = None
+    api_model: Optional[str] = None
 
     @field_validator("url")
     @classmethod
@@ -115,6 +121,22 @@ class PlatformOut(BaseModel):
     url_checked_at: Optional[datetime] = None
     url_check_message: str = ""
     expected_host: str = ""
+    execution_mode: str = "web_only"
+    api_provider: str = ""
+    api_model: str = ""
+
+
+class SelectorTestBody(BaseModel):
+    """在线试跑一组选择器。未传的字段沿用平台已保存的值。"""
+
+    selectors: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionPatchBody(BaseModel):
+    """重命名或置顶会话。"""
+
+    title: Optional[str] = None
+    pinned: Optional[bool] = None
 
 
 class AnswerOut(BaseModel):
@@ -157,6 +179,7 @@ class SessionSummary(BaseModel):
     # 首问摘要 + 轮次，便于历史列表区分主题
     preview: str = ""
     qa_count: int = 0
+    pinned: bool = False
 
 
 class SessionOut(BaseModel):

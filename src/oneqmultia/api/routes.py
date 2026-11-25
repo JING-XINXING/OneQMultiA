@@ -14,6 +14,7 @@ from oneqmultia.api.schemas import (
     LlmChoiceBody,
     SessionCreateBody,
     SessionOut,
+    SessionPatchBody,
     SessionSummary,
 )
 from oneqmultia.core.aggregator import summarize_results
@@ -30,6 +31,7 @@ from oneqmultia.core.session_manager import (
     make_session_preview,
     maybe_update_session_title,
 )
+from oneqmultia.core.session_search import search_sessions
 from oneqmultia.sharing.share_service import create_share_link
 from oneqmultia.storage.database import get_db
 from oneqmultia.storage.models import QAPairRow
@@ -45,6 +47,22 @@ def _browser_context(request: Request) -> Optional[BrowserContext]:
 def post_session(body: SessionCreateBody, db: Session = Depends(get_db)) -> SessionOut:
     row = create_session(db, title=body.title)
     return SessionOut.model_validate(row)
+
+
+@router.get("/sessions/search", response_model=List[SessionSummary])
+def search_session_list(q: str = "", db: Session = Depends(get_db)) -> List[SessionSummary]:
+    """按标题、问题和回答检索历史会话。必须写在 /sessions/{session_id} 之前。"""
+    rows = search_sessions(db, q)
+    return [
+        SessionSummary(
+            id=row.id,
+            title=row.title,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            pinned=bool(row.pinned),
+        )
+        for row in rows
+    ]
 
 
 @router.get("/sessions/{session_id}", response_model=SessionOut)
@@ -202,6 +220,41 @@ def refresh_qa_compare(
     raise HTTPException(status_code=404, detail="qa_pair not found")
 
 
+@router.patch("/sessions/{session_id}", response_model=SessionSummary)
+def patch_session(session_id: str, body: SessionPatchBody, db: Session = Depends(get_db)) -> SessionSummary:
+    """重命名或置顶。"""
+    row = get_session(db, session_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    if body.title is not None:
+        row.title = body.title.strip() or row.title
+    if body.pinned is not None:
+        row.pinned = body.pinned
+    db.commit()
+    db.refresh(row)
+    return SessionSummary(
+        id=row.id,
+        title=row.title,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        pinned=bool(row.pinned),
+    )
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, db: Session = Depends(get_db)) -> dict:
+    """删除单个会话及其问答、分享链接。"""
+    from oneqmultia.storage.models import ShareLinkRow
+
+    row = get_session(db, session_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    db.query(ShareLinkRow).filter(ShareLinkRow.session_id == session_id).delete()
+    db.delete(row)
+    db.commit()
+    return {"deleted": session_id}
+
+
 @router.get("/sessions", response_model=List[SessionSummary])
 def list_sessions(db: Session = Depends(get_db)) -> List[SessionSummary]:
     from sqlalchemy import select
@@ -234,8 +287,16 @@ def list_sessions(db: Session = Depends(get_db)) -> List[SessionSummary]:
                 updated_at=r.updated_at,
                 preview=make_session_preview(first_q),
                 qa_count=len(qas),
+                pinned=bool(getattr(r, "pinned", False)),
             )
         )
+    out.sort(key=lambda item: (not item.pinned, item.updated_at), reverse=False)
+    # 置顶优先后，同一组内仍按更新时间新的在前
+    pinned = [item for item in out if item.pinned]
+    rest = [item for item in out if not item.pinned]
+    pinned.sort(key=lambda item: item.updated_at, reverse=True)
+    rest.sort(key=lambda item: item.updated_at, reverse=True)
+    out = pinned + rest
     if changed:
         db.commit()
     return out

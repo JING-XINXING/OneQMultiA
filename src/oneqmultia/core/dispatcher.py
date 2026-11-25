@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from oneqmultia.config.settings import Settings
 from oneqmultia.core.page_nav import should_open_entry_url
+from oneqmultia.platforms.api_adapter import ApiPlatformAdapter
 from oneqmultia.platforms.base import AskResult, AskTiming, BasePlatformAdapter, ProgressEmit
 from oneqmultia.storage.models import PlatformAnswerRow, QAPairRow
 
@@ -158,6 +159,16 @@ async def _get_or_open_page(
     return page
 
 
+def execution_mode_of(adapter: BasePlatformAdapter) -> str:
+    """读取平台执行模式，缺省为只走网页。"""
+    mode = (getattr(adapter.config, "execution_mode", "") or "").strip()
+    if not mode:
+        mode = str((adapter.config.interaction or {}).get("execution_mode") or "web_only")
+    if mode not in {"web_only", "api_only", "web_with_api_fallback"}:
+        return "web_only"
+    return mode
+
+
 def _result_to_event(r: AskResult) -> Dict[str, Any]:
     """将 AskResult 转为可 JSON 序列化的 platform_done 负载（时间用 ISO 字符串）。"""
     return {
@@ -214,23 +225,49 @@ async def dispatch_to_adapters(
         if progress:
             await progress(evt)
 
+    async def _ask_api(adapter: BasePlatformAdapter) -> AskResult:
+        """不打开网页，直接走官方 API。"""
+        await _prog({
+            "type": "platform_start",
+            "platform_id": adapter.platform_id,
+            "platform_name": adapter.config.display_name,
+        })
+        api = adapter if isinstance(adapter, ApiPlatformAdapter) else ApiPlatformAdapter(adapter.config)
+
+        async def child_emit(payload: Dict[str, Any]) -> None:
+            await _prog({
+                "platform_id": adapter.platform_id,
+                "platform_name": adapter.config.display_name,
+                **payload,
+            })
+
+        result = await api.ask(None, question, emit=child_emit if progress else None)
+        await _prog(_result_to_event(result))
+        return result
+
     if context is None:
-        results = [
-            AskResult(
-                platform_id=a.platform_id,
-                platform_name=a.config.display_name,
-                platform_url=a.config.url,
+        # 没有浏览器时，API 直连和可降级平台仍然可以回答
+        browserless = [a for a in adapters if execution_mode_of(a) in {"api_only", "web_with_api_fallback"}]
+        web_only = [a for a in adapters if a not in browserless]
+        results_by_id: Dict[str, AskResult] = {}
+        for adapter in web_only:
+            result = AskResult(
+                platform_id=adapter.platform_id,
+                platform_name=adapter.config.display_name,
+                platform_url=adapter.config.url,
                 answer_text="",
                 status="skipped",
                 error_message="未连接浏览器：请设置 ONEQMULTIA_CDP_URL 并启动带远程调试的 Chrome",
                 timing=AskTiming(),
             )
-            for a in adapters
-        ]
-        for a, r in zip(adapters, results):
-            await _prog({"type": "platform_start", "platform_id": a.platform_id, "platform_name": a.config.display_name})
-            await _prog(_result_to_event(r))
-        return results
+            results_by_id[adapter.platform_id] = result
+            await _prog({"type": "platform_start", "platform_id": adapter.platform_id, "platform_name": adapter.config.display_name})
+            await _prog(_result_to_event(result))
+        if browserless:
+            api_results = await asyncio.gather(*[_ask_api(adapter) for adapter in browserless])
+            for adapter, result in zip(browserless, api_results):
+                results_by_id[adapter.platform_id] = result
+        return [results_by_id[adapter.platform_id] for adapter in adapters]
 
     settings = Settings()
     # 信号量限制并发 Tab 数，防止资源耗尽
@@ -279,6 +316,13 @@ async def dispatch_to_adapters(
             })
 
         try:
+            emit: ProgressEmit = child_emit if progress else None
+            mode = execution_mode_of(adapter)
+            if mode == "api_only":
+                api = adapter if isinstance(adapter, ApiPlatformAdapter) else ApiPlatformAdapter(adapter.config)
+                result = await _run_ask(api, None, emit)
+                await _prog(_result_to_event(result))
+                return result
             # 同域串行 + Page 租约：同一时刻同一页面只允许一个协程写入
             domain_lock = await _lock_for_host(adapter.config.url)
             async with domain_lock:
@@ -289,10 +333,12 @@ async def dispatch_to_adapters(
                 _in_use_pages.add(page_key)
                 try:
                     setattr(adapter, "is_first_in_session", is_first_in_session)
-                    emit: ProgressEmit = child_emit if progress else None
                     result = await _run_ask(adapter, page, emit)
                 finally:
                     _in_use_pages.discard(page_key)
+            if mode == "web_with_api_fallback" and result.status in {"error", "timeout"}:
+                api = ApiPlatformAdapter(adapter.config)
+                result = await _run_ask(api, None, emit)
             await _prog(_result_to_event(result))
             return result
         except asyncio.CancelledError:

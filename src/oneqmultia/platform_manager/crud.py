@@ -55,6 +55,9 @@ def create_platform(db: Session, data: dict[str, Any], *, commit: bool = True) -
         url_status=data.get("url_status") or "unknown",
         url_check_message=data.get("url_check_message") or "",
         expected_host=data.get("expected_host") or _host_from_url(data.get("url") or ""),
+        execution_mode=data.get("execution_mode") or "web_only",
+        api_provider=data.get("api_provider") or "",
+        api_model=data.get("api_model") or "",
     )
     db.add(row)
     if commit:
@@ -85,6 +88,9 @@ def update_platform(db: Session, platform_id: str, data: dict[str, Any]) -> Opti
         "url_status",
         "url_check_message",
         "expected_host",
+        "execution_mode",
+        "api_provider",
+        "api_model",
     ):
         if key in data:
             setattr(row, key, data[key])
